@@ -1,0 +1,131 @@
+name: OpenEngine Linux build
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: CMake target to build
+        required: true
+        default: Editor
+        type: choice
+        options:
+          - Editor
+          - Player
+          - GameEngineCli
+      configuration:
+        description: Build configuration
+        required: true
+        default: DebugFast
+        type: choice
+        options:
+          - DebugFast
+          - Debug
+          - RelWithDebInfo
+          - Release
+      with_mcp:
+        description: Also build McpServer
+        required: true
+        default: true
+        type: boolean
+      enable_tests:
+        description: Configure BUILD_TESTING=ON
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openengine-linux-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            nasm \
+            pkg-config \
+            git \
+            autoconf \
+            autoconf-archive \
+            automake \
+            libtool \
+            libx11-dev \
+            libxcb1-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            xorg-dev \
+            libglu1-mesa-dev
+
+      - name: Cache vcpkg binary archives
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: >-
+            openengine-vcpkg-linux-x64-${{
+              hashFiles(
+                'vcpkg.json',
+                'vcpkg-configuration.json',
+                'cmake/VcpkgPin.cmake',
+                'cmake/ports/**'
+              )
+            }}
+          restore-keys: |
+            openengine-vcpkg-linux-x64-
+
+      - name: Check build environment
+        run: python Tools/Scripts/openengine.py doctor --preset linux-x64-local
+
+      - name: Configure and build
+        env:
+          TARGET: ${{ inputs.target }}
+          CONFIGURATION: ${{ inputs.configuration }}
+          WITH_MCP: ${{ inputs.with_mcp }}
+          ENABLE_TESTS: ${{ inputs.enable_tests }}
+        run: |
+          args=(
+            build
+            --preset linux-x64-local
+            --config "$CONFIGURATION"
+            --target "$TARGET"
+          )
+          if [[ "$WITH_MCP" == "true" ]]; then
+            args+=(--with-mcp)
+          fi
+          if [[ "$ENABLE_TESTS" == "true" ]]; then
+            args+=(--tests)
+          fi
+          python Tools/Scripts/openengine.py "${args[@]}"
