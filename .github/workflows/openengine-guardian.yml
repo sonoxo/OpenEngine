@@ -39,7 +39,7 @@ jobs:
             echo "No Actions runs found for $sha."
             exit 0
           fi
-          failures="$(jq -sr '[.[] | select(.head_sha == env.sha and .status == "completed" and .conclusion == "failure")] | unique_by(.name) | .[]' <<<"$runs")"
+          failures="$(jq -sr '[.[] | select(.head_sha == env.sha)] | group_by(.name) | map(max_by(.id)) | .[] | select(.status == "completed" and .conclusion == "failure")' <<<"$runs")"
           if [[ -z "$failures" ]]; then
             echo "No failed workflow runs detected for PR #1 head $sha."
             exit 0
