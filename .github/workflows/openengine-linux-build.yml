@@ -1,6 +1,16 @@
 name: OpenEngine Linux build
 
 on:
+  pull_request:
+    paths:
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "vcpkg.json"
+      - "vcpkg-configuration.json"
+      - "cmake/**"
+      - "Tools/Scripts/openengine.py"
+      - "Tools/Docker/**"
+      - ".github/workflows/openengine-linux-build.yml"
   workflow_dispatch:
     inputs:
       target:
@@ -111,10 +121,10 @@ jobs:
 
       - name: Configure and build
         env:
-          TARGET: ${{ inputs.target }}
-          CONFIGURATION: ${{ inputs.configuration }}
-          WITH_MCP: ${{ inputs.with_mcp }}
-          ENABLE_TESTS: ${{ inputs.enable_tests }}
+          TARGET: ${{ inputs.target || 'Editor' }}
+          CONFIGURATION: ${{ inputs.configuration || 'DebugFast' }}
+          WITH_MCP: ${{ inputs.with_mcp || false }}
+          ENABLE_TESTS: ${{ inputs.enable_tests || false }}
         run: |
           args=(
             build
