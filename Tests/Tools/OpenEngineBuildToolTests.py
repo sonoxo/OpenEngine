@@ -5,6 +5,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest import mock
 import sys
 from pathlib import Path
 
@@ -239,3 +240,88 @@ class OpenEngineBuildToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class OpenEngineBuildToolRegressionTests(unittest.TestCase):
+    def test_steamdeck_defaults_to_player(self) -> None:
+        data = openengine.load_presets()
+        preset_name, preset = openengine.resolve_preset(
+            "steamdeck-x64-local",
+            data=data,
+        )
+        self.assertEqual(
+            openengine.default_targets(preset_name, preset, data),
+            ["Player"],
+        )
+
+    def test_wasm_defaults_to_web_editor(self) -> None:
+        data = openengine.load_presets()
+        preset_name, preset = openengine.resolve_preset("wasm-debug", data=data)
+        self.assertEqual(
+            openengine.default_targets(preset_name, preset, data),
+            ["WebEditor"],
+        )
+
+    def test_build_preset_targets_take_precedence(self) -> None:
+        data = openengine.load_presets()
+        preset_name, preset = openengine.resolve_preset(
+            "macos-arm64-editor-fast",
+            data=data,
+        )
+        self.assertEqual(
+            openengine.default_targets(preset_name, preset, data),
+            ["Editor"],
+        )
+
+    def test_single_config_rejects_config_override_with_no_configure(self) -> None:
+        data = openengine.load_presets()
+        preset_name, preset = openengine.resolve_preset(
+            "linux-x64-local",
+            data=data,
+        )
+        with self.assertRaises(openengine.BuildError):
+            openengine.validate_no_configure_configuration(
+                no_configure=True,
+                requested_configuration="Release",
+                preset_name=preset_name,
+                preset=preset,
+            )
+
+    def test_multi_config_allows_config_override_with_no_configure(self) -> None:
+        data = openengine.load_presets()
+        preset_name, preset = openengine.resolve_preset(
+            "vs2026-x64-local",
+            data=data,
+        )
+        openengine.validate_no_configure_configuration(
+            no_configure=True,
+            requested_configuration="Release",
+            preset_name=preset_name,
+            preset=preset,
+        )
+
+    def test_mcp_validation_rejects_old_node(self) -> None:
+        with mock.patch.object(
+            openengine,
+            "first_output",
+            side_effect=[(True, "v18.20.0"), (True, "10.0.0")],
+        ):
+            with self.assertRaises(openengine.BuildError):
+                openengine.validate_mcp_toolchain()
+
+    def test_mcp_validation_requires_npm(self) -> None:
+        with mock.patch.object(
+            openengine,
+            "first_output",
+            side_effect=[(True, "v20.12.0"), (False, "not found in PATH")],
+        ):
+            with self.assertRaises(openengine.BuildError):
+                openengine.validate_mcp_toolchain()
+
+    def test_mcp_validation_accepts_node20_and_npm(self) -> None:
+        with mock.patch.object(
+            openengine,
+            "first_output",
+            side_effect=[(True, "v20.12.0"), (True, "10.5.0")],
+        ):
+            openengine.validate_mcp_toolchain()
