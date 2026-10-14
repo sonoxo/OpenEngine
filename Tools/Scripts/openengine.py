@@ -24,6 +24,7 @@ PRESETS_PATH = REPO_ROOT / "CMakePresets.json"
 VERSION_PATH = REPO_ROOT / "VERSION"
 MIN_CMAKE = (3, 25, 0)
 MIN_PYTHON = (3, 10)
+MIN_NODE = (20, 0, 0)
 
 
 class BuildError(RuntimeError):
@@ -359,6 +360,15 @@ def tool_statuses(preset: dict) -> list[ToolStatus]:
     elif system_name == "Darwin":
         xcode_ok, xcode_detail = first_output(["xcode-select", "-p"])
         statuses.append(ToolStatus("xcode", True, xcode_ok, xcode_detail))
+    elif system_name == "Windows":
+        if "Ninja" in generator:
+            compiler_ok, compiler_detail = first_output(["cl", "/?"])
+            if not compiler_ok and shutil.which("clang-cl"):
+                compiler_ok, compiler_detail = first_output(["clang-cl", "--version"])
+            statuses.append(ToolStatus("compiler", True, compiler_ok, compiler_detail))
+        elif generator.startswith("Visual Studio"):
+            compiler_ok, compiler_detail = first_output(["cl", "/?"])
+            statuses.append(ToolStatus("msvc", True, compiler_ok, compiler_detail))
 
     node_ok, node_detail = first_output(["node", "--version"])
     statuses.append(ToolStatus("node", False, node_ok, node_detail))
@@ -445,11 +455,81 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def normalized_targets(raw_targets: list[str] | None, with_mcp: bool) -> list[str]:
-    targets = list(raw_targets or ["Editor"])
+def default_targets(
+    preset_name: str,
+    preset: dict,
+    data: dict,
+) -> list[str]:
+    build_preset = build_presets(data).get(preset_name, {})
+    explicit_targets = build_preset.get("targets")
+    if isinstance(explicit_targets, list) and all(
+        isinstance(target, str) and target for target in explicit_targets
+    ):
+        return list(explicit_targets)
+
+    cache_variables = preset.get("cacheVariables", {})
+    if not isinstance(cache_variables, dict):
+        cache_variables = {}
+
+    if str(cache_variables.get("GE_WASM", "")).upper() == "ON":
+        return ["WebEditor"]
+
+    editor_enabled = str(cache_variables.get("BUILD_EDITOR", "ON")).upper() != "OFF"
+    player_enabled = str(cache_variables.get("BUILD_PLAYER", "ON")).upper() != "OFF"
+    if not editor_enabled and player_enabled:
+        return ["Player"]
+    if editor_enabled:
+        return ["Editor"]
+    if player_enabled:
+        return ["Player"]
+
+    raise BuildError(
+        f"Configure preset {preset_name} disables Editor and Player; pass --target explicitly."
+    )
+
+
+def normalized_targets(
+    raw_targets: list[str] | None,
+    with_mcp: bool,
+    *,
+    preset_name: str,
+    preset: dict,
+    data: dict,
+) -> list[str]:
+    targets = list(raw_targets or default_targets(preset_name, preset, data))
     if with_mcp and "McpServer" not in targets:
         targets.append("McpServer")
     return targets
+
+
+def validate_no_configure_configuration(
+    *,
+    no_configure: bool,
+    requested_configuration: str | None,
+    preset_name: str,
+    preset: dict,
+) -> None:
+    if no_configure and requested_configuration is not None and not is_multi_config(preset):
+        raise BuildError(
+            f"--config cannot be combined with --no-configure for single-config preset "
+            f"{preset_name}; run configure so CMAKE_BUILD_TYPE is updated."
+        )
+
+
+def validate_mcp_toolchain() -> None:
+    node_ok, node_detail = first_output(["node", "--version"])
+    if not node_ok:
+        raise BuildError("--with-mcp requires Node.js 20 or newer on PATH.")
+    node_version = parse_version(node_detail.lstrip("vV"))
+    if node_version < MIN_NODE:
+        raise BuildError(
+            f"--with-mcp requires Node.js >= {'.'.join(map(str, MIN_NODE))}; "
+            f"found {node_detail}."
+        )
+
+    npm_ok, npm_detail = first_output(["npm", "--version"])
+    if not npm_ok:
+        raise BuildError(f"--with-mcp requires npm on PATH ({npm_detail}).")
 
 
 def validate_jobs(jobs: int) -> None:
@@ -471,7 +551,19 @@ def plan_commands(args: argparse.Namespace) -> tuple[str, dict, str, list[list[s
         preset,
         preset_data,
     )
-    targets = normalized_targets(args.targets, args.with_mcp)
+    validate_no_configure_configuration(
+        no_configure=args.no_configure,
+        requested_configuration=args.config,
+        preset_name=preset_name,
+        preset=preset,
+    )
+    targets = normalized_targets(
+        args.targets,
+        args.with_mcp,
+        preset_name=preset_name,
+        preset=preset,
+        data=preset_data,
+    )
 
     commands: list[list[str]] = []
     if not args.no_configure:
@@ -528,8 +620,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(command_text(command))
             return 0
 
-        if args.with_mcp and shutil.which("node") is None and not args.dry_run:
-            raise BuildError("--with-mcp requires Node.js 20 or newer on PATH.")
+        if args.with_mcp and not args.dry_run:
+            validate_mcp_toolchain()
 
         for command in commands:
             run_command(command, dry_run=args.dry_run)
