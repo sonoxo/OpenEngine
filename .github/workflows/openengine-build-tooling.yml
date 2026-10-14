@@ -1,0 +1,58 @@
+name: OpenEngine build tooling
+
+on:
+  pull_request:
+    paths:
+      - "Tools/Scripts/openengine.py"
+      - "Tests/Tools/OpenEngineBuildToolTests.py"
+      - "CMakePresets.json"
+      - "VERSION"
+      - ".github/workflows/openengine-build-tooling.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "Tools/Scripts/openengine.py"
+      - "Tests/Tools/OpenEngineBuildToolTests.py"
+      - "CMakePresets.json"
+      - "VERSION"
+      - ".github/workflows/openengine-build-tooling.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tooling:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.12"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run build-tool tests
+        run: python Tests/Tools/OpenEngineBuildToolTests.py
+
+      - name: Validate CMake presets
+        run: cmake --list-presets
+
+      - name: Validate deterministic Linux plan
+        run: >-
+          python Tools/Scripts/openengine.py plan
+          --preset linux-x64-local
+          --config DebugFast
+          --target Editor
+          --with-mcp
+          --jobs 6
