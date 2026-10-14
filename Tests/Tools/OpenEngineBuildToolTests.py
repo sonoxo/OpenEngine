@@ -238,10 +238,6 @@ class OpenEngineBuildToolTests(unittest.TestCase):
         json.loads((ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class OpenEngineBuildToolRegressionTests(unittest.TestCase):
     def test_steamdeck_defaults_to_player(self) -> None:
         data = openengine.load_presets()
@@ -325,3 +321,7 @@ class OpenEngineBuildToolRegressionTests(unittest.TestCase):
             side_effect=[(True, "v20.12.0"), (True, "10.5.0")],
         ):
             openengine.validate_mcp_toolchain()
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
