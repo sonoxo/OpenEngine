@@ -5,6 +5,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 
@@ -15,6 +16,7 @@ spec = importlib.util.spec_from_file_location("openengine_build", SCRIPT)
 if spec is None or spec.loader is None:
     raise RuntimeError("Unable to load Open Engine build orchestrator")
 openengine = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = openengine
 spec.loader.exec_module(openengine)
 
 
