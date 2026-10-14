@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "CMakeLists.txt"
+      - "**/CMakeLists.txt"
       - "CMakePresets.json"
       - "vcpkg.json"
       - "vcpkg-configuration.json"
