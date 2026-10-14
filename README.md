@@ -43,6 +43,17 @@ The library behind them is [`@game-crafters-guild/openengine-web`](https://www.n
 
 Prerequisites on Windows: Visual Studio 2026 with the *Desktop development with C++* workload (includes CMake, Ninja and Git), the .NET 10 SDK and a Vulkan-capable GPU driver.
 
+The cross-platform build helper selects the repository's existing CMake preset for the current desktop platform, checks the toolchain, and builds only the targets you ask for:
+
+```bash
+python Tools/Scripts/openengine.py doctor
+python Tools/Scripts/openengine.py build --target Editor --with-mcp
+```
+
+Use `python Tools/Scripts/openengine.py plan --target Editor --with-mcp` to print the exact CMake commands without changing the build tree, or pass `--preset` when you want a specific preset.
+
+The equivalent Windows commands are:
+
 ```bat
 git clone https://github.com/Game-Crafters-Guild/OpenEngine.git
 cd OpenEngine
