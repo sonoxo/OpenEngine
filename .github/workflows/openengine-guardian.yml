@@ -1,0 +1,57 @@
+name: OpenEngine guardian bot
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: openengine-guardian
+  cancel-in-progress: true
+
+jobs:
+  inspect-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Inspect PR 1 and its build checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/$GH_REPO/pulls/1")"
+          if [[ "$(jq -r '.state' <<<"$pr")" != "open" ]]; then
+            echo "PR #1 is no longer open; no action required."
+            exit 0
+          fi
+          sha="$(jq -r '.head.sha' <<<"$pr")"
+          runs="$(gh api --paginate "repos/$GH_REPO/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs[] | {id, name, status, conclusion, html_url, head_sha}')"
+          if [[ -z "$runs" ]]; then
+            echo "No Actions runs found for $sha."
+            exit 0
+          fi
+          failures="$(jq -sr '[.[] | select(.head_sha == env.sha and .status == "completed" and .conclusion == "failure")] | unique_by(.name) | .[]' <<<"$runs")"
+          if [[ -z "$failures" ]]; then
+            echo "No failed workflow runs detected for PR #1 head $sha."
+            exit 0
+          fi
+          latest="$(jq -sr 'sort_by(.id) | last' <<<"$failures")"
+          run_id="$(jq -r '.id' <<<"$latest")"
+          marker="<!-- openengine-guardian-run:$run_id -->"
+          prior="$(gh api --paginate "repos/$GH_REPO/issues/1/comments?per_page=100" --jq '.[].body' || true)"
+          if grep -Fq "$marker" <<<"$prior"; then
+            echo "Already reported run $run_id."
+            exit 0
+          fi
+          run_url="$(jq -r '.html_url' <<<"$latest")"
+          body="$(printf '%s\n%s\n%s' "$marker" "OpenEngine guardian: CI failure detected for PR #1 at \`$sha\`." "Inspect run: $run_url. Resolve the failure and rerun checks before merging.")"
+          gh api -X POST "repos/$GH_REPO/issues/1/comments" -f body="$body" >/dev/null
+          echo "Posted CI failure notification for run $run_id."
