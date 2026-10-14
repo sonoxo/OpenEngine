@@ -38,7 +38,7 @@ python Tools/Scripts/openengine.py plan --target Editor --with-mcp
 python Tools/Scripts/openengine.py build --target Editor --with-mcp
 ```
 
-Defaults are `vs2026-x64-local` on Windows x64, `vs2026-arm64-local` on Windows ARM64, `macos-arm64-local` or `macos-x64-local` on macOS, and `linux-x64-local` on Linux x64. Use `--ninja` for the Windows Ninja preset or `--preset <name>` for any explicit preset. `--config` selects `DebugFast`, `Debug`, `RelWithDebInfo`, `Release`, or `MinSizeRel`; `--tests` configures `BUILD_TESTING=ON` without running the full test set.
+Defaults are `vs2026-x64-local` on Windows x64, `vs2026-arm64-local` on Windows ARM64, `macos-arm64-local` or `macos-x64-local` on macOS, and `linux-x64-local` on Linux x64. Use `--ninja` for the Windows Ninja preset or `--preset <name>` for any explicit preset. `--config` overrides the preset with `DebugFast`, `Debug`, `RelWithDebInfo`, `Release`, or `MinSizeRel`; when omitted, a preset-defined configuration is preserved (including sanitizer presets' `Debug`) and other presets use `DebugFast`. `--tests` configures `BUILD_TESTING=ON` without running the full test set.
 
 The repository also has an on-demand **OpenEngine Linux build** workflow under GitHub Actions for a clean hosted build of `Editor`, `Player`, or `GameEngineCli`. It reuses the same orchestrator and the vcpkg binary cache.
 

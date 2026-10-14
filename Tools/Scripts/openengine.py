@@ -63,6 +63,51 @@ def configure_presets(data: dict) -> dict[str, dict]:
     }
 
 
+def build_presets(data: dict) -> dict[str, dict]:
+    return {
+        preset["name"]: preset
+        for preset in data.get("buildPresets", [])
+        if isinstance(preset, dict) and isinstance(preset.get("name"), str)
+    }
+
+
+def merge_preset_values(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_preset_values(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def materialize_configure_preset(
+    name: str,
+    presets: dict[str, dict],
+    stack: tuple[str, ...] = (),
+) -> dict:
+    if name in stack:
+        chain = " -> ".join((*stack, name))
+        raise BuildError(f"CMake preset inheritance cycle: {chain}")
+    raw = presets.get(name)
+    if raw is None:
+        raise BuildError(f"Unknown inherited configure preset: {name}")
+
+    parents = raw.get("inherits", [])
+    if isinstance(parents, str):
+        parents = [parents]
+
+    merged: dict = {}
+    for parent in parents:
+        if not isinstance(parent, str):
+            raise BuildError(f"Invalid inherited preset name in {name}")
+        merged = merge_preset_values(
+            merged,
+            materialize_configure_preset(parent, presets, (*stack, name)),
+        )
+    return merge_preset_values(merged, raw)
+
+
 def canonical_machine(machine: str) -> str:
     value = machine.strip().lower()
     if value in {"amd64", "x86_64", "x64"}:
@@ -116,7 +161,57 @@ def resolve_preset(
     )
     if name not in presets:
         raise BuildError(f"Unknown configure preset: {name}")
-    return name, presets[name]
+    return name, materialize_configure_preset(name, presets)
+
+
+def resolve_configuration(
+    requested: str | None,
+    preset_name: str,
+    preset: dict,
+    data: dict,
+) -> str:
+    if requested:
+        return requested
+
+    build_preset = build_presets(data).get(preset_name, {})
+    build_configuration = build_preset.get("configuration")
+    if isinstance(build_configuration, str) and build_configuration:
+        return build_configuration
+
+    cache_variables = preset.get("cacheVariables", {})
+    configured_type = (
+        cache_variables.get("CMAKE_BUILD_TYPE")
+        if isinstance(cache_variables, dict)
+        else None
+    )
+    if isinstance(configured_type, str) and configured_type:
+        return configured_type
+
+    return "DebugFast"
+
+
+def expand_binary_dir(preset_name: str, preset: dict) -> str:
+    raw = preset.get("binaryDir")
+    if not isinstance(raw, str) or not raw:
+        raise BuildError(
+            f"Configure preset {preset_name} has no build preset or binaryDir."
+        )
+    if "$env{" in raw or "$penv{" in raw:
+        raise BuildError(
+            f"Configure preset {preset_name} uses an environment macro in binaryDir; "
+            "add a matching build preset."
+        )
+
+    replacements = {
+        "${sourceDir}": str(REPO_ROOT),
+        "${sourceParentDir}": str(REPO_ROOT.parent),
+        "${sourceDirName}": REPO_ROOT.name,
+        "${presetName}": preset_name,
+    }
+    result = raw
+    for marker, value in replacements.items():
+        result = result.replace(marker, value)
+    return result
 
 
 def is_multi_config(preset: dict) -> bool:
@@ -153,8 +248,12 @@ def make_build_command(
     configuration: str,
     targets: Iterable[str],
     jobs: int,
+    use_build_preset: bool = True,
 ) -> list[str]:
-    command = ["cmake", "--build", "--preset", preset_name]
+    if use_build_preset:
+        command = ["cmake", "--build", "--preset", preset_name]
+    else:
+        command = ["cmake", "--build", expand_binary_dir(preset_name, preset)]
     if is_multi_config(preset):
         command.extend(["--config", configuration])
 
@@ -330,8 +429,9 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--ninja", action="store_true", help="Prefer the Windows Ninja preset.")
         command.add_argument(
             "--config",
-            default="DebugFast",
+            default=None,
             choices=("DebugFast", "Debug", "RelWithDebInfo", "Release", "MinSizeRel"),
+            help="Override the preset configuration; otherwise use the preset value or DebugFast.",
         )
         command.add_argument("--target", action="append", dest="targets")
         command.add_argument("--with-mcp", action="store_true")
@@ -357,9 +457,20 @@ def validate_jobs(jobs: int) -> None:
         raise BuildError("--jobs must be between 1 and 256")
 
 
-def plan_commands(args: argparse.Namespace) -> tuple[str, dict, list[list[str]]]:
+def plan_commands(args: argparse.Namespace) -> tuple[str, dict, str, list[list[str]]]:
     validate_jobs(args.jobs)
-    preset_name, preset = resolve_preset(args.preset, prefer_ninja=args.ninja)
+    preset_data = load_presets()
+    preset_name, preset = resolve_preset(
+        args.preset,
+        prefer_ninja=args.ninja,
+        data=preset_data,
+    )
+    configuration = resolve_configuration(
+        args.config,
+        preset_name,
+        preset,
+        preset_data,
+    )
     targets = normalized_targets(args.targets, args.with_mcp)
 
     commands: list[list[str]] = []
@@ -368,7 +479,7 @@ def plan_commands(args: argparse.Namespace) -> tuple[str, dict, list[list[str]]]
             make_configure_command(
                 preset_name,
                 preset,
-                configuration=args.config,
+                configuration=configuration,
                 enable_tests=args.tests,
                 vcpkg_features=args.vcpkg_features,
             )
@@ -377,12 +488,13 @@ def plan_commands(args: argparse.Namespace) -> tuple[str, dict, list[list[str]]]
         make_build_command(
             preset_name,
             preset,
-            configuration=args.config,
+            configuration=configuration,
             targets=targets,
             jobs=args.jobs,
+            use_build_preset=preset_name in build_presets(preset_data),
         )
     )
-    return preset_name, preset, commands
+    return preset_name, preset, configuration, commands
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -407,9 +519,9 @@ def main(argv: list[str] | None = None) -> int:
                 print_doctor(report)
             return 0 if report["ready"] else 1
 
-        preset_name, preset, commands = plan_commands(args)
+        preset_name, preset, configuration, commands = plan_commands(args)
         print(f"Open Engine preset: {preset_name} ({preset.get('generator', '')})")
-        print(f"Configuration: {args.config}")
+        print(f"Configuration: {configuration}")
 
         if args.command == "plan":
             for command in commands:

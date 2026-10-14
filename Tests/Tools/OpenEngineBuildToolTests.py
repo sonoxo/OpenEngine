@@ -152,8 +152,9 @@ class OpenEngineBuildToolTests(unittest.TestCase):
                 "6",
             ]
         )
-        preset_name, preset, commands = openengine.plan_commands(args)
+        preset_name, preset, configuration, commands = openengine.plan_commands(args)
         self.assertEqual(preset_name, "linux-x64-local")
+        self.assertEqual(configuration, "DebugFast")
         self.assertEqual(preset["generator"], "Ninja")
         self.assertEqual(
             commands[0],
@@ -178,6 +179,58 @@ class OpenEngineBuildToolTests(unittest.TestCase):
                 "-j",
                 "6",
             ],
+        )
+
+
+    def test_sanitizer_preset_preserves_debug_configuration(self) -> None:
+        data = openengine.load_presets()
+        preset_name, preset = openengine.resolve_preset(
+            "macos-arm64-local-asan",
+            data=data,
+        )
+        self.assertEqual(preset["generator"], "Ninja")
+        self.assertEqual(
+            openengine.resolve_configuration(None, preset_name, preset, data),
+            "Debug",
+        )
+
+    def test_configure_only_preset_builds_by_binary_directory(self) -> None:
+        data = openengine.load_presets()
+        preset_name, preset = openengine.resolve_preset("vs2026-x64", data=data)
+        command = openengine.make_build_command(
+            preset_name,
+            preset,
+            configuration="DebugFast",
+            targets=["Editor"],
+            jobs=4,
+            use_build_preset=False,
+        )
+        self.assertEqual(
+            command[:3],
+            ["cmake", "--build", "build/vs2026-x64"],
+        )
+        self.assertIn("--config", command)
+        self.assertIn("DebugFast", command)
+
+    def test_plan_uses_configure_only_preset_without_build_preset(self) -> None:
+        parser = openengine.build_parser()
+        args = parser.parse_args(
+            [
+                "plan",
+                "--preset",
+                "vs2026-x64",
+                "--target",
+                "Editor",
+                "--jobs",
+                "4",
+            ]
+        )
+        preset_name, _, configuration, commands = openengine.plan_commands(args)
+        self.assertEqual(preset_name, "vs2026-x64")
+        self.assertEqual(configuration, "DebugFast")
+        self.assertEqual(
+            commands[1][:3],
+            ["cmake", "--build", "build/vs2026-x64"],
         )
 
     def test_json_preset_file_is_valid_json(self) -> None:
