@@ -33,6 +33,7 @@ jobs:
             exit 0
           fi
           sha="$(jq -r '.head.sha' <<<"$pr")"
+          export sha
           runs="$(gh api --paginate "repos/$GH_REPO/actions/runs?head_sha=$sha&per_page=100" --jq '.workflow_runs[] | {id, name, status, conclusion, html_url, head_sha}')"
           if [[ -z "$runs" ]]; then
             echo "No Actions runs found for $sha."
