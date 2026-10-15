@@ -28,6 +28,20 @@ Install the [prerequisites](#prerequisites), then copy the block for your platfo
 
 The first configure compiles about 60 third-party libraries (tens of minutes) unless the binary cache has them; later configures take about a minute. When a dependency version moves (a `git pull` that changes `vcpkg.json` or `cmake/ports/`), the configure installs the new version in place and marks its headers as changed, so the next build recompiles the files that include them. When a dependency is rebuilt at the same version with a different ABI (a Visual Studio update, or a `cmake/VcpkgPin.cmake` change that moves the vcpkg checkout), no file would recompile against it, so the configure stops and tells you to delete `build/<preset>` and reconfigure.
 
+### Cross-platform build helper
+
+`Tools/Scripts/openengine.py` is a thin command layer over these presets. It does not own a second build graph: it resolves a preset, checks the host tools, and emits the same CMake commands shown below.
+
+```bash
+python Tools/Scripts/openengine.py doctor
+python Tools/Scripts/openengine.py plan --target Editor --with-mcp
+python Tools/Scripts/openengine.py build --target Editor --with-mcp
+```
+
+Defaults are `vs2026-x64-local` on Windows x64, `vs2026-arm64-local` on Windows ARM64, `macos-arm64-local` or `macos-x64-local` on macOS, and `linux-x64-local` on Linux x64. Use `--ninja` for the Windows Ninja preset or `--preset <name>` for any explicit preset. `--config` overrides the preset with `DebugFast`, `Debug`, `RelWithDebInfo`, `Release`, or `MinSizeRel`; when omitted, a preset-defined configuration is preserved (including sanitizer presets' `Debug`) and other presets use `DebugFast`. `--tests` configures `BUILD_TESTING=ON` without running the full test set.
+
+The repository also has an on-demand **OpenEngine Linux build** workflow under GitHub Actions for a clean hosted build of `Editor`, `Player`, or `GameEngineCli`. It reuses the same orchestrator and the vcpkg binary cache.
+
 ### Windows (Visual Studio)
 
 Run in a **Developer Command Prompt for VS 2026** (or Developer PowerShell), which puts Visual Studio's CMake and Ninja on PATH. `-j 12` is the number of parallel compile jobs; use your core count or lower. The prompt opens inside the Visual Studio folder, so move to where the clone should live first: any folder with no spaces in its path, outside `Program Files`.
